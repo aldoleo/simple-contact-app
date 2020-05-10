@@ -1,0 +1,154 @@
+//
+//  DetailContactViewController.swift
+//  SimpleContactApp
+//
+//  Created by Aldo Leonardo on 09/05/20.
+//  Copyright © 2020 Aldo Leonardo. All rights reserved.
+//
+
+import UIKit
+
+class DetailContactViewController: UIViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    
+    @IBOutlet weak var firstNameTextField: UITextField!
+    @IBOutlet weak var lastNameNameTextField: UITextField!
+    @IBOutlet weak var ageTextField: UITextField!
+    @IBOutlet weak var doneButton: UIButton!
+    @IBOutlet weak var addPhotoButton: UIButton!
+    @IBOutlet weak var profileImage: UIImageView!
+    
+    let imagePicker = UIImagePickerController()
+    var imageBase64 = ""
+    let uuid = UUID().uuidString
+    var contact: Contact?
+    var HTTPMethod: HTTPMethod?
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        imagePicker.delegate = self
+        imagePicker.allowsEditing = true
+        configure()
+    }
+    
+    func configure() {
+        firstNameTextField.addDoneButton(title: "Done", target: self, selector: #selector(tapDone(sender:)))
+        lastNameNameTextField.addDoneButton(title: "Done", target: self, selector: #selector(tapDone(sender:)))
+        ageTextField.addDoneButton(title: "Done", target: self, selector: #selector(tapDone(sender:)))
+        profileImage.setRounded()
+        
+        if contact != nil {
+            firstNameTextField.text = contact?.firstName
+            lastNameNameTextField.text = contact?.lastName
+            ageTextField.text = "\(contact?.age ?? 0)"
+            
+            if contact?.photo?.absoluteString.contains("http") ?? false {
+                DispatchQueue.global().async { [weak self] in
+                    if let data = try? Data(contentsOf: self?.contact?.photo ?? URL(fileURLWithPath: "")) {
+                        if let image = UIImage(data: data) {
+                            DispatchQueue.main.async {
+                                self?.profileImage.image = image
+                            }
+                        }
+                    }
+                }
+            } else {
+                let photoUserDefault = UserDefaults.standard.dictionary(forKey: "photoUserDefault") as? [String:String]
+                if !(photoUserDefault?.isEmpty ?? true) {
+                    var photo = ""
+                    let result = photoUserDefault?.filter({ (key, _ ) -> Bool in key == contact?.photo?.absoluteString }) ?? []
+                    result.forEach { (key ,value) in
+                        photo = value
+                    }
+                    let newImageData = Data(base64Encoded: photo)
+                    if let newImageData = newImageData, !newImageData.isEmpty {
+                        profileImage.image = UIImage(data: newImageData)
+                    } else {
+                        profileImage.image = #imageLiteral(resourceName: "profilePlaceHolder")
+                    }
+                } else {
+                    profileImage.image = #imageLiteral(resourceName: "profilePlaceHolder")
+                }
+            }
+        } else {
+            firstNameTextField.placeholder = "First Name"
+            lastNameNameTextField.placeholder = "Last Name"
+            ageTextField.placeholder = "Age"
+            profileImage.image = #imageLiteral(resourceName: "profile")
+        }
+    }
+    
+    @IBAction func didTapImage(_ sender: Any) {
+        let alert = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        
+        alert.addAction(UIAlertAction(title: "Photo Gallery", style: .default, handler: { (button) in
+            self.imagePicker.sourceType = .photoLibrary
+            self.present(self.imagePicker, animated: true, completion: nil)
+        }))
+        
+        alert.addAction(UIAlertAction(title: "Camera", style: .default, handler: { (button) in
+            if UIImagePickerController.isSourceTypeAvailable(.camera){
+                self.imagePicker.sourceType = .camera
+            }
+            self.present(self.imagePicker, animated: true, completion: nil)
+        }))
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        
+        present(alert, animated: true, completion: nil)
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        guard let pickedImage = info[UIImagePickerController.InfoKey.editedImage] as? UIImage else { return }
+        profileImage.image = pickedImage
+        imageBase64 = profileImage.convertImageToBase64(pickedImage) ?? ""
+        dismiss(animated: true, completion: nil)
+    }
+    
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        view.endEditing(true)
+    }
+    
+    @objc func tapDone(sender: Any) {
+        self.view.endEditing(true)
+    }
+    
+    private func insertData() -> Contact {
+        saveUserDefault(uuid, imageBase64)
+        let contact = Contact(id: nil,
+                              firstName: firstNameTextField.text,
+                              lastName: lastNameNameTextField.text,
+                              age: Int(ageTextField.text ?? ""),
+                              photo: URL(string: uuid))
+        return contact
+    }
+    
+    @IBAction func didTapDone(_ sender: Any) {
+        doneButton.pulsate()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if self.HTTPMethod == .PUT {
+                updateUserDefault(self.uuid, self.imageBase64)
+                let contactRequest = APIManager(endpoint: "\(Constant.endpoint)/\(self.contact?.id ?? "")")
+                contactRequest.sendRequest(self.insertData(), httpMethod: .PUT, completion: { result in
+                    switch result {
+                    case .failure(let err):
+                        print(err)
+                    case .success(let value):
+                        print(value)
+                    }
+                })
+            } else {
+                let contactRequest = APIManager(endpoint: Constant.endpoint)
+                contactRequest.sendRequest(self.insertData(), httpMethod: .POST, completion: { result in
+                    switch result {
+                    case .failure(let err):
+                        print(err)
+                    case .success(let value):
+                        print(value)
+                    }
+                })
+            }
+            self.navigationController?.popToRootViewController(animated: true)
+        }
+    }
+}
+
